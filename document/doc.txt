@@ -1,0 +1,390 @@
+﻿hibernate.cfg.xml
+	hibernate的核心配置文件，主要用于定义
+		数据库连接相关配置          hibernate的运行时常量【插入连接池，启用缓存】       注册映射元文件
+		
+	hibernate可以使用直连方式建立数据库连接
+	
+	为了提高资源重用可以使用连接池
+		Hibernate默认提供了一个简单的连接池实现 【类似于hashtable】   DriverManagerConnectionProvider
+		<property name="connection.pool_size">3</property>
+			这种配置只能用于简单测试或者开发阶段，不可能用于产品环境
+				
+hibernate提供了扩展接口ConnectionProvider可以将一些成品连接池插入到hibernate中直接使用
+		例如hibernate自带的c3p0和proxool,一般开发中多使用c3p0,配置方便简单
+			
+			1\引入optional/c3p0/下的jar
+			
+			2\设置使用c3p0连接池
+				<property name="connection.provider_class">org.hibernate.connection.C3P0ConnectionProvider</property>
+				
+			3\配置c3p0的常量
+				<property name="c3p0.max_size">100</property>连接池的最大连接数
+				<property name="c3p0.min_size">30</property>连接池的最小连接数
+				<property name="c3p0.acquire_increment">20</property>连接池连接数量增长的步长值
+				<property name="c3p0.timeout">10000</property>等待获取连接的超时设置，单位为ms
+				另外还有一些常量c3p0.max_statements   c3p0.idle_test_period
+				
+			查询运行结果:
+				Initializing c3p0 pool... com.mchange.v2.c3p0.PoolBackedDataSource@f35341f [ connectionPoolDataSource -> com.mchange.v2.c3p0.WrapperConnectionPoolDataSource@a49bf6e1 [ acquireIncrement -> 20, acquireRetryAttempts -> 30, acquireRetryDelay -> 1000, autoCommitOnClose -> false, automaticTestTable -> null, breakAfterAcquireFailure -> false, checkoutTimeout -> 0, connectionCustomizerClassName -> null, connectionTesterClassName -> com.mchange.v2.c3p0.impl.DefaultConnectionTester, debugUnreturnedConnectionStackTraces -> false, factoryClassLocation -> null, forceIgnoreUnresolvedTransactions -> false, identityToken -> 1hge15n945utbu41j0mnn5|1f6f27b, idleConnectionTestPeriod -> 0, initialPoolSize -> 30, maxAdministrativeTaskTime -> 0, maxConnectionAge -> 0, maxIdleTime -> 10000, maxIdleTimeExcessConnections -> 0, maxPoolSize -> 100, maxStatements -> 0, maxStatementsPerConnection -> 0, minPoolSize -> 30, nestedDataSource -> com.mchange.v2.c3p0.DriverManagerDataSource@bd1284d [ description -> null, driverClass -> null, factoryClassLocation -> null, identityToken -> 1hge15n945utbu41j0mnn5|d58939, jdbcUrl -> jdbc:oracle:thin:@localhost:1521:ORCL, properties -> {user=******, password=******} ], preferredTestQuery -> null, propertyCycle -> 0, testConnectionOnCheckin -> false, testConnectionOnCheckout -> false, unreturnedConnectionTimeout -> 0, usesTraditionalReflectiveProxies -> false; userOverrides: {} ], dataSourceName -> null, factoryClassLocation -> null, identityToken -> 1hge15n945utbu41j0mnn5|b4be3d, numHelperThreads -> 3 ]
+
+		Hiberante可以使用由容器管理的连接池   DatasourceConnectionProvider
+			JNDI:Java命名目录API  用于在运行容器中获取/修改由容器管理的对象
+				是SUN定义的规范，具体的底层实现有很多，比如DNS,使用JNDI编程可以屏蔽底层实现的差异性
+				
+			例如：使用tomcat容器,由Tomcat负责管理连接池，hibernate从容器管理的连接池中获取连接
+			1\在Tomcat中配置连接池
+				tomcat/conf/context.xml
+					添加资源配置<Resource name="访问路径" auth="Container容器管理" type="资源类型" 
+		username="连接数据库的用户名" password="连接数据库的口令" driverClassName="驱动串" url="连接串" 
+		maxActive="最大活跃连接数" maxIdle="最大空闲连接数"/>
+					例如：<Resource name="jdbc/test" auth="Container" type="javax.sql.DataSource" username="yanjun" password="123456" driverClassName="oracle.jdbc.OracleDriver" url="jdbc:oracle:thin:@localhost:1521:ORCL" maxActive="50" maxIdle="20"/>
+			
+			2、将驱动程序和连接池jar包拷贝到tomcat/lib中
+				tomcat中默认所使用的连接池为dbcp[apache]
+				
+			3\重启服务器
+			
+			4、为了验证成功可以通过jsp或者Servlet访问连接池
+
+<%@page import="java.sql.ResultSet"%>
+<%@page import="java.sql.PreparedStatement"%>
+<%@page import="java.sql.Connection"%>
+<%@page import="javax.sql.DataSource"%>
+<%@page import="javax.naming.InitialContext"%>
+<%@page import="javax.naming.Context"%>
+<%@ page language="java" import="java.util.*" pageEncoding="ISO-8859-1"%>
+<%
+	Context ctx=new InitialContext();
+	DataSource ds=(DataSource)ctx.lookup("java:comp/env/jdbc/test");
+	Connection conn=ds.getConnection();
+	PreparedStatement ps=conn.prepareStatement("select sysdate from dual");
+	ResultSet rs=ps.executeQuery();
+	if(rs.next()){
+		Date dd=rs.getDate(1);
+		out.println(dd);
+	}
+	rs.close();
+%>
+					
+			5\在Hibernate中配置使用连接池
+				<session-factory>
+					<property name="connection.datasource">java:comp/env/jdbc/test</property>
+					<property name="dialect">org.hibernate.dialect.Oracle9Dialect</property>
+				</session-factory>
+				
+			6\测试Hibernate， 容器管理的连接池所以运行hibernate，必须启动容器【这种方法只用于产品环境，开发和测试阶段不适合】
+
+	public void showConnection(){
+		Configuration cfg = new Configuration().configure();
+		SessionFactory fac = cfg.buildSessionFactory();
+		Session s = fac.openSession();
+		Connection conn = s.connection();
+		System.out.println(conn);
+		s.close();
+	}
+	
+	开发阶段一般使用直连方式，测试阶段可以使用Hibernate管理的连接池，只有产品部署且具有容器的管理权限才会考虑使用容器管理的连接池
+	
+hibernate.cfg.xml的解析
+	重要的常量配置
+		<property name="show_sql">true</property>
+		<property name="format_sql">true</property>
+			这两个配置可以实现在控制台上输出所执行的SQL语句，只用于开发阶段，应用部署时需要关闭或者直接删除
+			
+		<property name="hbm2ddl.auto">update</property>	
+			在  SessionFactory创建时，自动检查数据库结构，或者将数据库 schema的DDL导出到数据库。
+			使用  create-drop时，在显式关闭SessionFactory时，将删除掉数据库 schema。
+			例如：validate只做效验，不做任何修改  |update如果不一样则进行修改【添加有效，删除无效】|  
+				create启动时自动创建  |  create-drop启动时创建，关闭时自动删除
+				
+			开发阶段一般配置update，测试阶段一般配置create-drop,产品一般最多配置validate
+			
+		<property name="dialect">org.hibernate.dialect.Oracle9Dialect</property>数据库的方言设置
+			不管使用什么连接管理方式必须配置,用于供hiberante识别不同的数据库，以生成匹配数据库的特定sql语句
+				
+				Oracle分页使用rownum  mysql分页使用limit  sqlserver分页使用top						
+
+	
+	<hibernate-configuration>
+	<session-factory>
+		用于定义数据库连接相关配置
+		<property name="myeclipse.connection.profile">yan1</property>
+		<property name="connection.url">jdbc:oracle:thin:@localhost:1521:ORCL</property>
+		<property name="connection.username">yanjun</property>
+		<property name="connection.password">123456</property>
+		<property name="connection.driver_class">oracle.jdbc.OracleDriver</property>
+		<property name="dialect">org.hibernate.dialect.Oracle9Dialect</property>  最重要的内容，是数据库的方言设置
+		
+		定义hibernate的运行时常量配置
+		<property name="show_sql">true</property>
+		<property name="format_sql">true</property>
+		<property name="hbm2ddl.auto">update</property>
+		
+		注册映射元文件,映射可以定义在xml文件中，还可以使用注解配置
+		<mapping resource="com/yan/entity/UserBean.hbm.xml" />
+		
+		<mapping class="com.yan.entity.RoleBean" />  使用注解配置的方式
+		
+	</session-factory>
+
+</hibernate-configuration>			
+	
+UserBean.hbm.xml的解析
+	表结构：
+create table t_users(
+	id number(18) primary key,--使用Hibernate的时候，尽量一定要定义主键
+	username varchar2(20) not null unique,
+	password varchar2(20) not null,
+	birth date default sysdate,
+	sex number(1) default 1
+);
+
+create sequence seq_users start with 1 maxvalue 999999999999;  如果不指定sequence则系统默认使用hibernate_sequence
+
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE hibernate-mapping PUBLIC "-//Hibernate/Hibernate Mapping DTD 3.0//EN"
+"http://hibernate.sourceforge.net/hibernate-mapping-3.0.dtd">
+<!-- 
+    映射元文件
+-->
+<hibernate-mapping>
+    <class name="com.yan.entity.UserBean类名称,可以使用全名，也可以把包名定义在hibernate-mapping标签中" 
+  table="T_USERS类所对应的表名称" schema="YANJUN模式名，一般删除">
+        <id name="id属性名称" type="java.lang.Long属性的对应类型，一般hibernate已经提供了所有的属性类型，
+        不用人为定义,可以使用java类型也可以使用hibernate类型">用于定义标识属性
+            <column name="ID列名称" 特殊约束,比如针对数值型precision="18总位宽" scale="0小数位数" />定义对应的列，
+         如果属性名和列名称一致，可以不定义
+            <generator class="sequence">
+            	<param name="sequence">seq_users</param>定义序列生成器的参数，这里是配置具体序列对象的名称
+            </generator>用于声明所使用的标识生成器,这里使用的是针对oracle或者 db2的序列对象
+        </id>
+        
+        <property name="username属性名称" type="java.lang.String属性的数据类型">用于声明非标识属性
+            <column name="USERNAME对应的列名称" 列的约束length="20长度" not-null="true非空" unique="true唯一" />
+        </property>
+        
+    </class>
+</hibernate-mapping>
+	
+	注意：映射元文件必须注册,hibernate.cfg.xml中添加<mapping resource="com/yan/entity/UserBean.hbm.xml" />
+
+
+实体类的要求：
+	必须有无参构造器，因为hibernate的底层实现使用的是反射机制   Class.forName("com.yan.UserBean").newInstance()
+	私有属性，共有的get/set方法
+
+映射的注解配置:
+	JPA:  java持久化API,是SUN定义的持久层规范
+		具体实现有Hibernate[开源免费]  TopLink[oracle提供的商用实现]
+		
+@Entity用于声明当前类为实体类
+@Table(name="表明")  用于声明当前类所对应的表
+
+@Id用于声明标识属性
+@GeneratedValue用于声明标识属性所使用的标识生成器
+
+@Column用于声明对应的列定义
+	
+	属性的注解配置可以直接定义在属性上，也可以定义在get方法上，官方推荐使用方法注解
+		属性上配置会认为破坏了类的封装性
+
+@Entity
+@Table(name = "t_roles")
+public class RoleBean implements Serializable {
+	private static final long serialVersionUID = 4032018179903490727L;
+	@Id
+	@GeneratedValue(strategy = GenerationType.SEQUENCE)
+	private Long id;
+	@Column(name = "rname", length = 32, nullable = false, unique = true)
+	private String name;
+	
+	get/set方法
+}
+
+在hibernate.cfg.xml中注册
+	<mapping class="com.yan.entity.RoleBean" /> 
+		
+ORM	Object-->Relation 创建表的方式
+	<property name="hbm2ddl.auto">update</property>
+	创建SessionFactory自动进行生成
+	
+	编码实现生成
+		Configuration cfg=new AnnotationConfiguration().configure();
+		SchemaExport se=new SchemaExport(cfg);
+		se.create(true, true);	
+
+
+5大核心编程接口   HibernateSessionFactory工具类的解析
+	其生命周期导致的对应编程方法
+	
+HibernateSessionFactory.java是IDE自动生成的一个用于管理Session的工具类	
+	
+1、Configuration用于读取并解析hibernate配置文件,是SessionFactory的工厂,即用即丢型对象，创建fac后没有必要保存，
+	最佳声明周期在方法体中
+
+	Hibernate核心配置方式有2种   src/hibernate.properties和src/hibernate.cfg.xml[推荐]
+		new Configuration()-->hibernate.properties
+			configure()-->hibernate.cfg.xml  如果修改xml的位置或者名称，就需要在方法中带参		
+								
+public class HibernateSessionFactory {
+	private static String CONFIG_FILE_LOCATION = "/hibernate.cfg.xml";
+    private  static Configuration configuration = new AnnotationConfiguration();    
+    private static String configFile = CONFIG_FILE_LOCATION;
+
+	public static void setConfigFile(String configFile) {
+		HibernateSessionFactory.configFile = configFile;
+		sessionFactory = null;
+	}
+	public static Configuration getConfiguration() {
+		return configuration;
+	}
+}
+
+2、SessionFactory是单个数据库的内存镜像,是线程安全的长生命周期对象，充当Session的工厂。
+	一般持有一个二级缓存,属于重量级对象，一般不进行频繁的创建和销毁,一般来说针对一个数据库只创建一个对象.
+	最佳的生命周期为application.	编程可以使用单例模式
+	
+	singleton模式：
+		用于保证一个class在JVM中只有一个对象
+			编程：  私有构造   静态属性   静态方法
+			
+public class HibernateSessionFactory {
+    private static org.hibernate.SessionFactory sessionFactory;
+
+	static {   模拟单例模式中的饿汉模式
+    	try {
+			configuration.configure(configFile);
+			sessionFactory = configuration.buildSessionFactory();
+		} catch (Exception e) {			
+			e.printStackTrace();
+		}
+    }
+    private HibernateSessionFactory() {     }
+
+	public static org.hibernate.SessionFactory getSessionFactory() {
+		return sessionFactory;
+	}
+}
+
+3、Session充当实体类的管理器功能【save(obj) delete(obj)  update(obj) load/get】,是Transaction对象的工厂,
+是Connection对象的一个浅封装[Connection conn = s.connection();],所以需要保证及时关闭【try/finally结构】
+线程不安全的短生命周期对象，最佳生命周期request或者方法体内[ThreadLocal本地化线程变量保证一个请求一个session]
+public class HibernateSessionFactory {
+	private static final ThreadLocal<Session> threadLocal = new ThreadLocal<Session>();
+
+    public static Session getSession() throws HibernateException {
+        Session session = (Session) threadLocal.get();
+		if (session == null || !session.isOpen()) {
+			if (sessionFactory == null) rebuildSessionFactory();
+			session = (sessionFactory != null) ? sessionFactory.openSession() : null;
+			threadLocal.set(session);
+		}
+        return session;
+    }
+
+    public static void closeSession() throws HibernateException {
+        Session session = (Session) threadLocal.get();
+        threadLocal.set(null);
+        if (session != null) session.close();
+    }
+}
+
+为了完成及时关闭，可以考虑采用OpenSessionInViewFilter模式
+	保证一个请求一个事务一个Session，可以避免延迟加载问题
+	
+	缺点：如果有长事务处理，可能会严重影响并发性
+	
+	public void doFilter(ServletRequest arg0, ServletResponse arg1,
+			FilterChain arg2) throws IOException, ServletException {
+		try {
+			arg2.doFilter(arg0, arg1);
+		}finally {
+			HibernateSessionFactory.closeSession();
+		}
+	}	
+
+
+4、Transaction接口可以屏蔽具体的事务实现方法，hibernate默认事务回滚，如果需要修改生效，则需要手动事务提交.
+线程不安全的短生命周期对象，最佳生命周期request或者方法体内
+	考虑使用ThreadLocal本地化线程变量保证一个请求一个transaction
+	
+	Transaction tx=s.beginTransaction();启动事务
+		transaction实际上是和session绑定的,所以可以通过session获取上次构建的transaction对象
+		
+	s.getTransaction():Transaction获取上次启动的事务对象
+		
+		commit()提交事务   rollback()回滚事务
+		
+		tx.wasCommitted()是否已经提交
+		tx.wasRolledBack()	是否已经回滚
+		
+	建议扩展工具类，添加对事务的支持，以简化过滤器的编写
+
+public class HibernateSessionFactory {
+	private static final ThreadLocal<Transaction> ts=new ThreadLocal<Transaction>();
+
+	public static Transaction beginTransaction()throws HibernateException{
+		Transaction tx=ts.get();
+		if(tx==null || tx.wasCommitted() || tx.wasRolledBack()){
+			Session s=getSession();
+			tx=s!=null?s.beginTransaction():null;
+			ts.set(tx);
+		}
+		return tx;
+	}
+	public static void commitTranction()throws HibernateException{
+		Transaction tx=ts.get();
+		ts.set(null);
+		if(tx!=null && !tx.wasCommitted() && !tx.wasRolledBack())
+			tx.commit();
+	}
+	public static void rollbackTranction()throws HibernateException{
+		Transaction tx=ts.get();
+		ts.set(null);
+		if(tx!=null && !tx.wasCommitted() && !tx.wasRolledBack())
+			tx.rollback();
+	}
+}	
+
+完成过滤器
+	public void doFilter(ServletRequest arg0, ServletResponse arg1,
+			FilterChain arg2) throws IOException, ServletException {
+		try {
+			HibernateSessionFactory.beginTransaction();
+			arg2.doFilter(arg0, arg1);
+			HibernateSessionFactory.commitTranction();
+		} catch (Exception e) {
+			HibernateSessionFactory.rollbackTranction();
+			throw new ServletException(e);
+		} finally {
+			HibernateSessionFactory.closeSession();
+		}
+	}
+	
+	
+hibernate的一个优点：HibernateException
+	public class HibernateException extends RuntimeException
+	hibernate对JDBC中SQLException进行了二次封装，将受检型异常转换为了运行时异常[非受检型异常],可以简化调用编码
+	
+	Connection conn=null;
+	try{
+		conn=....;
+		PreparedStatemnt ps=conn.prepareStatement(sql);
+		....;
+	}catch(Exception e){
+		?好的处理方法，？能不能准确的判断到底是什么异常
+			SQLException的颗粒度太大了，不能准确判定
+	}finally{
+		if(conn!=null)
+			conn.close();   这里还有异常，还需要try/catch结构
+	}	
+		
+		
+		
+				
+				
+								
+								
+					
+		
+		
