@@ -1,0 +1,2 @@
+# hibernate_0020_base
+hibernate_0020_base
